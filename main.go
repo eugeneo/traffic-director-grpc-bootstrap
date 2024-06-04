@@ -36,7 +36,6 @@ import (
 )
 
 var (
-	xdsServerUri           = flag.String("xds-server-uri", "trafficdirector.googleapis.com:443", "override of server uri, for testing")
 	outputName             = flag.String("output", "-", "output file name")
 	gcpProjectNumber       = flag.Int64("gcp-project-number", 0, "the gcp project number. If unknown, can be found via 'gcloud projects list'")
 	vpcNetworkName         = flag.String("vpc-network-name", "default", "VPC network name")
@@ -58,7 +57,8 @@ func main() {
 	nodeMetadata := make(map[string]string)
 	flag.Var(newStringMapVal(&nodeMetadata), "node-metadata",
 		"additional metadata of the form key=value to be included in the node configuration")
-
+	xdsServerUris := []string{}
+	flag.Var(newStringListVal(&xdsServerUris), "xds-server-uri", "override of server uri, for testing. This flag can be specified multiple times to configure several servers.")
 	flag.Var(flag.Lookup("secrets-dir").Value, "secrets-dir-experimental",
 		"alias of secrets-dir. This flag is EXPERIMENTAL and will be removed in a later release")
 	flag.Var(flag.Lookup("node-metadata").Value, "node-metadata-experimental",
@@ -72,6 +72,9 @@ func main() {
 
 	flag.Parse()
 
+	if len(xdsServerUris) == 0 {
+		xdsServerUris = []string{"trafficdirector.googleapis.com:443"}
+	}
 	if *gcpProjectNumber == 0 {
 		var err error
 		*gcpProjectNumber, err = getProjectId()
@@ -176,7 +179,7 @@ func main() {
 	}
 
 	input := configInput{
-		xdsServerUri:           *xdsServerUri,
+		xdsServerUris:          xdsServerUris,
 		gcpProjectNumber:       *gcpProjectNumber,
 		vpcNetworkName:         *vpcNetworkName,
 		ip:                     ip,
@@ -229,7 +232,7 @@ func main() {
 }
 
 type configInput struct {
-	xdsServerUri           string
+	xdsServerUris          []string
 	gcpProjectNumber       int64
 	vpcNetworkName         string
 	ip                     string
@@ -254,16 +257,20 @@ func validate(in configInput) error {
 }
 
 func generate(in configInput) ([]byte, error) {
-	xdsServer := server{
-		ServerUri:    in.xdsServerUri,
-		ChannelCreds: []creds{{Type: "google_default"}},
-	}
+	xdsServers := []server{}
+	for _, server_uri := range in.xdsServerUris {
+		xdsServer := server{
+			ServerUri:    server_uri,
+			ChannelCreds: []creds{{Type: "google_default"}},
+		}
 
-	// Set xds_v3 Server Features.
-	xdsServer.ServerFeatures = append(xdsServer.ServerFeatures, "xds_v3")
+		// Set xds_v3 Server Features.
+		xdsServer.ServerFeatures = append(xdsServer.ServerFeatures, "xds_v3")
 
-	if in.ignoreResourceDeletion {
-		xdsServer.ServerFeatures = append(xdsServer.ServerFeatures, "ignore_resource_deletion")
+		if in.ignoreResourceDeletion {
+			xdsServer.ServerFeatures = append(xdsServer.ServerFeatures, "ignore_resource_deletion")
+		}
+		xdsServers = append(xdsServers, xdsServer)
 	}
 
 	// Setting networkIdentifier based on flags.
@@ -273,7 +280,7 @@ func generate(in configInput) ([]byte, error) {
 	}
 
 	c := &config{
-		XdsServers: []server{xdsServer},
+		XdsServers: xdsServers,
 		Node: &node{
 			Id:      fmt.Sprintf("projects/%d/networks/%s/nodes/%s", in.gcpProjectNumber, networkIdentifier, uuid.New().String()),
 			Cluster: "cluster", // unused by TD
