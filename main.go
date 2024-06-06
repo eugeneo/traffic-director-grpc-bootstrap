@@ -257,8 +257,8 @@ func validate(in configInput) error {
 }
 
 func generate(in configInput) ([]byte, error) {
-	xdsServers := []server{}
-	for _, server_uri := range in.xdsServerUris {
+	xdsServers := make([]server, len(in.xdsServerUris))
+	for i, server_uri := range in.xdsServerUris {
 		xdsServer := server{
 			ServerUri:    server_uri,
 			ChannelCreds: []creds{{Type: "google_default"}},
@@ -270,7 +270,7 @@ func generate(in configInput) ([]byte, error) {
 		if in.ignoreResourceDeletion {
 			xdsServer.ServerFeatures = append(xdsServer.ServerFeatures, "ignore_resource_deletion")
 		}
-		xdsServers = append(xdsServers, xdsServer)
+		xdsServers[i] = xdsServer
 	}
 
 	// Setting networkIdentifier based on flags.
